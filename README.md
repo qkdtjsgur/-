@@ -10,10 +10,10 @@ public class PlayerMovement : MonoBehaviour
     public float rollSpeed = 10f;                 // 구르기 속도
     public float rollDuration = 0.5f;             // 구르기 지속시간
     public Vector2 normalColliderSize = new Vector2(0.8355505f, 1.268564f); // 현재 Collider 크기
-    public Vector2 rollColliderSize = new Vector2(0.8355505f, 0.6f);        // 구르기 중 Collider 크기
+    public Vector2 rollColliderSize = new Vector2(0.8f, 0.6f);        // 구르기 중 Collider 크기
 
-    private bool isRolling = false;
-    private float rollTimer;
+    public bool isRolling = false;
+    public float rollTimer;
 
     [Header("땅 감지 설정")]
     public Transform groundCheck;
@@ -78,15 +78,18 @@ public class PlayerMovement : MonoBehaviour
     void StartRoll()
     {
         isRolling = true;
+        // Collider 크기 줄이기
+        col.size = rollColliderSize;
         animator.SetBool("isRolling", true);
+        animator.SetTrigger("roll");
         rollTimer = rollDuration;
+
 
         // 구르는 방향으로 이동
         float rollDirection = Mathf.Sign(transform.localScale.x);
         rb.linearVelocity = new Vector2(rollDirection * rollSpeed, rb.linearVelocity.y);
 
-        // Collider 크기 줄이기
-        col.size = rollColliderSize;
+      
     }
 
     void EndRoll()
