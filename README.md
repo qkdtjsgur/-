@@ -7,13 +7,19 @@ public class PlayerMovement : MonoBehaviour
     public float jumpForce = 7f;
 
     [Header("구르기 설정")]
-    public float rollSpeed = 10f;                 // 구르기 속도
-    public float rollDuration = 0.5f;             // 구르기 지속시간
-    public Vector2 normalColliderSize = new Vector2(0.8355505f, 1.268564f); // 현재 Collider 크기
-    public Vector2 rollColliderSize = new Vector2(0.5f, 0.3f);        // 구르기 중 Collider 크기
+    public float rollSpeed = 10f;
+    public float rollDuration = 0.5f;
+    public Vector2 normalColliderSize = new Vector2(0.8f, 1.2f);
+    public Vector2 rollColliderSize = new Vector2(0.4f, 0.6f);
 
     public bool isRolling = false;
     public float rollTimer;
+
+    [Header("공격 설정")]
+    public float comboResetTime = 1.0f;   // 콤보 리셋 시간
+    private int comboStep = 0;            // 현재 콤보 단계 (1~3)
+    private float lastAttackTime;         // 마지막 공격 시점
+    private bool isAttacking = false;
 
     [Header("땅 감지 설정")]
     public Transform groundCheck;
@@ -25,7 +31,6 @@ public class PlayerMovement : MonoBehaviour
     private bool isGrounded;
     private float moveInput;
 
-    // 내부 저장용 (원상복구)
     private Vector2 savedColliderSize;
     private Vector2 savedColliderOffset;
 
@@ -35,27 +40,25 @@ public class PlayerMovement : MonoBehaviour
         animator = GetComponent<Animator>();
         col = GetComponent<BoxCollider2D>();
 
-        // 현재 콜라이더 사이즈/오프셋 저장 (나중에 복원)
+        rollColliderSize = new Vector2(0.6f, 0.52f);
+
         if (col != null)
         {
             savedColliderSize = col.size;
             savedColliderOffset = col.offset;
-            // 초기값이 스크립트에 적혀있는 normalColliderSize와 다르면 동기화
             normalColliderSize = savedColliderSize;
         }
     }
 
     void Update()
     {
-        // --- 최신 지면 판정 (Update 초반에 계산해서 바로 입력에 반영) ---
+        // --- 지면 판정 ---
         if (groundCheck != null)
             isGrounded = Physics2D.OverlapCircle(groundCheck.position, 0.12f, groundLayer);
-        else
-            isGrounded = false;
 
         animator.SetBool("isGrounded", isGrounded);
 
-        // 구르기 중에는 다른 입력 무시(타이머만 감소)
+        // --- 구르기 중이면 다른 입력 무시 ---
         if (isRolling)
         {
             rollTimer -= Time.deltaTime;
@@ -64,44 +67,50 @@ public class PlayerMovement : MonoBehaviour
             return;
         }
 
-        // 이동
-        moveInput = Input.GetAxisRaw("Horizontal");
-        // rb.linearVelocity 대신 rb.velocity 사용 (안정성)
-        rb.linearVelocity = new Vector2(moveInput * moveSpeed, rb.linearVelocity.y);
-
-        // 애니메이션 파라미터 갱신
-        if (animator != null)
+        // --- 공격 중 ---
+        if (isAttacking)
         {
-            animator.SetFloat("speed", Mathf.Abs(moveInput));
-            animator.SetBool("isRolling", isRolling);
+            // 이동 정지
+            rb.linearVelocity = new Vector2(0, rb.linearVelocity.y);
+            // 콤보 타이머 경과 시 공격 해제
+            if (Time.time - lastAttackTime > 0.5f)
+                isAttacking = false;
+            return;
         }
 
-        // 좌우 반전 (localScale 방식 유지)
+        // --- 이동 ---
+        moveInput = Input.GetAxisRaw("Horizontal");
+        rb.linearVelocity = new Vector2(moveInput * moveSpeed, rb.linearVelocity.y);
+
+        animator.SetFloat("speed", Mathf.Abs(moveInput));
+        animator.SetBool("isRolling", isRolling);
+
         if (moveInput != 0)
             transform.localScale = new Vector3(Mathf.Sign(moveInput), 1, 1);
 
-        // 점프 (지면에 있을 때만)
+        // --- 점프 ---
         if (Input.GetKeyDown(KeyCode.Space) && isGrounded)
-        {
             Jump();
-        }
 
-        // 구르기 (LeftShift) — 공중 구르기 방지: 수직 속도 거의 0 인지 확인
+        // --- 구르기 ---
         if (Input.GetKeyDown(KeyCode.LeftShift))
         {
-            bool verticalStill = Mathf.Abs(rb.linearVelocity.y) < 0.05f; // 작게 잡아서 공중 감지 여유치 확보
+            bool verticalStill = Mathf.Abs(rb.linearVelocity.y) < 0.05f;
             if (!isRolling && isGrounded && verticalStill)
-            {
                 StartRoll();
-            }
+        }
+
+        // --- 공격 (마우스 왼쪽 클릭) ---
+        if (Input.GetMouseButtonDown(0))
+        {
+            TryAttack();
         }
     }
 
     void Jump()
     {
-        // 점프할 때 수직속도 세팅
         rb.linearVelocity = new Vector2(rb.linearVelocity.x, jumpForce);
-        if (animator != null) animator.SetTrigger("jump");
+        animator.SetTrigger("jump");
     }
 
     void StartRoll()
@@ -109,23 +118,11 @@ public class PlayerMovement : MonoBehaviour
         isRolling = true;
         rollTimer = rollDuration;
 
-        // 콜라이더 크기 줄이기 (안정성을 위해 saved 값 바탕으로 적용)
-        if (col != null)
-        {
-            col.size = rollColliderSize;
-            // offset은 고정 유지(원하면 조정 가능)
-            // col.offset = new Vector2(savedColliderOffset.x, savedColliderOffset.y - 0.2f);
-        }
+        col.size = rollColliderSize;
 
-        // 애니메이터 갱신
-        if (animator != null)
-        {
-            animator.SetBool("isRolling", true);
-            // 만약 Animator가 Trigger "roll"을 사용한다면 아래 줄도 활성화
-            animator.SetTrigger("roll");
-        }
+        animator.SetBool("isRolling", true);
+        animator.SetTrigger("roll");
 
-        // 구르는 방향으로 빠르게 이동
         float rollDirection = Mathf.Sign(transform.localScale.x);
         rb.linearVelocity = new Vector2(rollDirection * rollSpeed, rb.linearVelocity.y);
     }
@@ -133,26 +130,54 @@ public class PlayerMovement : MonoBehaviour
     void EndRoll()
     {
         isRolling = false;
+        col.size = savedColliderSize;
+        col.offset = savedColliderOffset;
+        animator.SetBool("isRolling", false);
+    }
 
-        // 콜라이더 원복
-        if (col != null)
+    // 🥊 공격 로직
+    void TryAttack()
+    {
+        // 조건: 낙하 중, 구르기 중엔 공격 불가
+        if (!isGrounded || isRolling) return;
+
+        // 콤보 시간 초과 시 리셋
+        if (Time.time - lastAttackTime > comboResetTime)
+            comboStep = 0;
+
+        comboStep++;
+        if (comboStep > 3) comboStep = 1;
+
+        // 공격 시작
+        isAttacking = true;
+        lastAttackTime = Time.time;
+
+        // 이동 정지
+        rb.linearVelocity = Vector2.zero;
+
+        // 애니메이션 트리거
+        switch (comboStep)
         {
-            col.size = savedColliderSize; // normalColliderSize 로도 가능
-            col.offset = savedColliderOffset;
+            case 1:
+                animator.SetTrigger("attack1");
+                break;
+            case 2:
+                animator.SetTrigger("attack2");
+                break;
+            case 3:
+                animator.SetTrigger("attack3");
+                break;
         }
 
-        if (animator != null)
-            animator.SetBool("isRolling", false);
+        // 일정 시간 후 공격 해제
+        Invoke(nameof(EndAttack), 0.4f);
     }
 
-    void FixedUpdate()
+    void EndAttack()
     {
-        // 기존 방식처럼 FixedUpdate에서 지면 체크 원하면 유지
-        // (여기서는 Update 쪽에서 이미 isGrounded를 갱신했으므로 굳이 다시 해도 무방)
-        // isGrounded = Physics2D.OverlapCircle(groundCheck.position, 0.12f, groundLayer);
+        isAttacking = false;
     }
 
-    // 시각적 확인용 Gizmo
     private void OnDrawGizmosSelected()
     {
         if (groundCheck != null)
